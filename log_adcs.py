@@ -4,7 +4,7 @@ from typing import Any, Iterable, List, Protocol, TextIO
 from time import sleep
 from pathlib import Path
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import datetime
 import argparse
 import csv
 from epics import PV
@@ -26,6 +26,8 @@ class Database:
         self.channel_count = channel_count
         self.file = file
         self.writer = writer
+        self.writer.writerow(["time, s"] + [f"ai{i}, V" for i in range(self.channel_count)])
+        self.file.flush()
 
         self.values: List[float | None] = [None] * self.channel_count
         self.time: float | None = None
@@ -80,7 +82,7 @@ def main() -> None:
     now = datetime.now()
     date_fmt = now.strftime("%Y-%m-%d_%H-%M-%S")
     out_path = args.out_dir / f"log_adcs_{date_fmt}.csv"
-    print(f"Logging to file '{out_path}'")
+    print(f"Logging ADC measurements to file '{out_path}'")
 
     channel_count = 6
     with open(out_path, "w") as file:
