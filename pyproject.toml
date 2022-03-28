@@ -8,6 +8,7 @@ license = "MIT"
 [tool.poetry.dependencies]
 python = "^3.9"
 pyepics = "^3.5.0"
+pyepics-asyncio = "^0.1.0"
 
 [tool.poetry.dev-dependencies]
 toml = "^0.10.2"

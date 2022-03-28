@@ -3,7 +3,7 @@ from typing import List
 
 import math
 
-from epics import PV
+from epics import PV # type: ignore
 
 
 def sine(mag: float, freq: float, count: int) -> List[float]:

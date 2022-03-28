@@ -1,13 +1,11 @@
 from __future__ import annotations
-from typing import Any, List, Generator
+from typing import List, Generator
 
 import sys
 import wave
-from threading import Condition
+import asyncio
 
-from epics import PV
-
-FREQ = 10000
+from pyepics_asyncio import Pv
 
 
 def sample(f: wave.Wave_read) -> float:
@@ -23,9 +21,9 @@ def sample(f: wave.Wave_read) -> float:
     return mean
 
 
-def waveform_reader(f: wave.Wave_read) -> Generator[List[float], None, None]:
+def waveform_reader(f: wave.Wave_read, nelm: int, freq: float = 1e4) -> Generator[List[float], None, None]:
     fps = f.getframerate()
-    ratio = fps / FREQ
+    ratio = fps / freq
     output: List[float] = []
     mean = 0.0
     counter = 0.0
@@ -38,7 +36,7 @@ def waveform_reader(f: wave.Wave_read) -> Generator[List[float], None, None]:
             part = counter - ratio
             mean += (1.0 - part) * value
             output.append(mean / ratio)
-            if len(output) >= FREQ:
+            if len(output) >= nelm:
                 yield output
                 output.clear()
             counter -= ratio
@@ -48,35 +46,21 @@ def waveform_reader(f: wave.Wave_read) -> Generator[List[float], None, None]:
     yield output
 
 
-class DacReadyMonitor:
+async def main(path: str) -> None:
+    reader = waveform_reader(wave.open(path, "rb"), 10000)
 
-    def _callback(self, value: Any, **kw: Any) -> None:
-        if value:
-            with self.cond:
-                self.cond.notify()
+    dac = await Pv.connect("aao0")
+    ready = await Pv.connect("aao0_request")
+    await (await Pv.connect("aao0_cyclic")).put(True)
 
-    def __init__(self) -> None:
-        self.cond = Condition()
-        self.pv = PV("aao0_request", auto_monitor=True, callback=self._callback)
-        self.pv.run_callbacks()
-
-    def wait(self) -> None:
-        with self.cond:
-            self.cond.wait()
-
-
-def main(path: str) -> None:
-    reader = waveform_reader(wave.open(path, "rb"))
-
-    PV("aao0_cyclic").put(True, wait=True)
-    dac = PV("aao0")
-    ready = DacReadyMonitor()
-
-    for i, waveform in enumerate(reader):
-        ready.wait()
-        print(f"Sending waveform {i} of {len(waveform)} points")
-        dac.put(waveform, wait=True)
+    async with ready.monitor(current=True) as ready_mon:
+        for i, waveform in enumerate(reader):
+            async for flag in ready_mon:
+                if flag:
+                    break
+            print(f"Sending waveform {i} of {len(waveform)} points")
+            await dac.put(waveform)
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:])
+    asyncio.run(main(*sys.argv[1:]))
