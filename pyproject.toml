@@ -9,6 +9,10 @@ license = "MIT"
 python = "^3.9"
 pyepics = "^3.5.0"
 pyepics-asyncio = "^0.1.0"
+aiofiles = "^0.8.0"
+types-aiofiles = "^0.8.6"
+aiocsv = "^1.2.1"
+aioitertools = "^0.10.0"
 
 [tool.poetry.dev-dependencies]
 toml = "^0.10.2"

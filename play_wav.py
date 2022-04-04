@@ -5,7 +5,7 @@ import sys
 import wave
 import asyncio
 
-from pyepics_asyncio import Pv
+from utils.tornado import play_on_dac, DAC_WF_MAX_LEN
 
 
 def sample(f: wave.Wave_read) -> float:
@@ -21,7 +21,7 @@ def sample(f: wave.Wave_read) -> float:
     return mean
 
 
-def waveform_reader(f: wave.Wave_read, nelm: int, freq: float = 1e4) -> Generator[List[float], None, None]:
+def wave_reader(f: wave.Wave_read, nelm: int, freq: float = 1e4) -> Generator[List[float], None, None]:
     fps = f.getframerate()
     ratio = fps / freq
     output: List[float] = []
@@ -47,19 +47,8 @@ def waveform_reader(f: wave.Wave_read, nelm: int, freq: float = 1e4) -> Generato
 
 
 async def main(path: str) -> None:
-    reader = waveform_reader(wave.open(path, "rb"), 10000)
-
-    dac = await Pv.connect("aao0")
-    ready = await Pv.connect("aao0_request")
-    await (await Pv.connect("aao0_cyclic")).put(True)
-
-    async with ready.monitor(current=True) as ready_mon:
-        for i, waveform in enumerate(reader):
-            async for flag in ready_mon:
-                if flag:
-                    break
-            print(f"Sending waveform {i} of {len(waveform)} points")
-            await dac.put(waveform)
+    generator = wave_reader(wave.open(path, "rb"), DAC_WF_MAX_LEN)
+    await play_on_dac(generator)
 
 
 if __name__ == "__main__":

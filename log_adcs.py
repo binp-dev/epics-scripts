@@ -1,69 +1,65 @@
 from __future__ import annotations
-from typing import Any, Iterable, List, Protocol, TextIO
+from typing import AsyncIterator, List
 
-from time import sleep
+import os
 from pathlib import Path
 from dataclasses import dataclass
+from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import datetime
 import argparse
-import csv
-from epics import PV
 
+import asyncio
+from aioitertools.builtins import zip as azip
+import aiofiles
+from aiocsv import AsyncWriter # type: ignore
 
-class CsvWriter(Protocol):
+from pyepics_asyncio import Pv
 
-    def writerow(self, row: Iterable[Any]) -> Any:
-        ...
+from utils import tornado
 
-    def writerows(self, rows: Iterable[Iterable[Any]]) -> None:
-        ...
+AsyncTextIO = aiofiles.threadpool.text.AsyncTextIOWrapper
 
-
-class Database:
-
-    def __init__(self, channel_count: int, now: datetime, file: TextIO, writer: CsvWriter) -> None:
-
-        self.channel_count = channel_count
-        self.file = file
-        self.writer = writer
-        self.writer.writerow(["time, s"] + [f"ai{i}, V" for i in range(self.channel_count)])
-        self.file.flush()
-
-        self.values: List[float | None] = [None] * self.channel_count
-        self.time: float | None = None
-
-        epoch = datetime.fromtimestamp(0)
-        self.start_time = (now - epoch).total_seconds()
-
-    def _write(self) -> None:
-        if self.time is not None:
-            time_fmt = f"{self.time:.3f}"
-        else:
-            time_fmt = "<unknown>"
-        values_fmt = [f"{v:.6f}" for v in self.values]
-
-        self.writer.writerow([time_fmt] + values_fmt)
-        self.file.flush()
-
-        #print(f"{time_fmt}: [{', '.join(values_fmt)}]")
-
-        self.time = None
-        self.values = [None] * self.channel_count
-
-    def push(self, index: int, value: float, timestamp: float) -> None:
-        self.time = timestamp - self.start_time
-        self.values[index] = value
-        if all([v is not None for v in self.values]):
-            self._write()
+Waveform = List[float]
 
 
 @dataclass
-class Callback:
-    db: Database
-    index: int
+class Storage:
+    file: AsyncTextIO
+    writer: AsyncWriter
+    start_time: datetime
 
-    def __call__(self, pvname: str, value: float, timestamp: float, **kws: Any) -> None:
-        self.db.push(self.index, value, timestamp)
+    @staticmethod
+    @asynccontextmanager
+    async def open(path: Path) -> AsyncIterator[Storage]:
+        async with aiofiles.open(path, mode="w", encoding="utf-8", newline="") as file:
+            yield await Storage.__ainit__(file)
+
+    @staticmethod
+    async def __ainit__(file: AsyncTextIO) -> Storage:
+        writer = AsyncWriter(file)
+
+        await writer.writerow(["time, s"] + [f"aai{i}, V" for i in range(tornado.ADC_CHANNEL_COUNT)])
+        await file.flush()
+
+        return Storage(file, writer, datetime.now())
+
+    async def write(self, waveforms: List[Waveform]) -> None:
+        now = (datetime.now() - self.start_time).total_seconds()
+        for i, values in enumerate(zip(*waveforms)):
+            time = now + i * tornado.ADC_PERIOD_S
+            await self.writer.writerow([f"{time:.3f}"] + [f"{v:.6f}" for v in values])
+
+        self.file.flush()
+
+
+async def store(path: Path) -> None:
+    async with Storage.open(path) as storage:
+        pvs = [await Pv.connect(f"aai{i}") for i in range(tornado.ADC_CHANNEL_COUNT)]
+        async with AsyncExitStack() as stack:
+            monitors = [await stack.enter_async_context(pv.monitor()) for pv in pvs]
+            async for wfs in azip(*monitors):
+                print(f"Write waveforms")
+                await storage.write(list(wfs))
 
 
 def main() -> None:
@@ -76,23 +72,12 @@ def main() -> None:
         default=Path.cwd(),
         help="Path to the directory where to create output file",
     )
-
     args = parser.parse_args()
-
-    now = datetime.now()
-    date_fmt = now.strftime("%Y-%m-%d_%H-%M-%S")
+    date_fmt = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     out_path = args.out_dir / f"log_adcs_{date_fmt}.csv"
+
     print(f"Logging ADC measurements to file '{out_path}'")
-
-    channel_count = 6
-    with open(out_path, "w") as file:
-        writer: CsvWriter = csv.writer(file, delimiter=",", quotechar="\"")
-        db = Database(channel_count, now, file, writer)
-        values = [None] * channel_count
-        pvs = [PV(f"ai{i}.VAL", callback=Callback(db, i)) for i in range(channel_count)]
-
-        while True:
-            sleep(1.0)
+    asyncio.run(store(out_path), debug=True)
 
 
 if __name__ == "__main__":

@@ -5,6 +5,8 @@ import math
 
 from epics import PV # type: ignore
 
+from utils.tornado import DAC_WF_MAX_LEN
+
 
 def sine(mag: float, freq: float, count: int) -> List[float]:
     ts = [float(i) / count for i in range(count)]
@@ -14,7 +16,7 @@ def sine(mag: float, freq: float, count: int) -> List[float]:
 def main() -> None:
     PV("aao0_cyclic").put(True, wait=True)
 
-    PV("aao0").put(sine(0.3, 500, 10000), wait=True)
+    PV("aao0").put(sine(0.3, 500, DAC_WF_MAX_LEN), wait=True)
 
 
 if __name__ == "__main__":

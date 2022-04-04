@@ -4,5 +4,6 @@ __pycache__
 .mypy_cache
 
 .vscode
+*.code-workspace
 
 *.csv
