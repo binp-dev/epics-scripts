@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import List
 
+import sys
 import math
 
 from epics import PV # type: ignore
@@ -14,9 +15,12 @@ def sine(mag: float, freq: float, count: int) -> List[float]:
 
 
 def main() -> None:
+    mag = float(sys.argv[1])
+    freq = float(sys.argv[2])
+
     PV("aao0_cyclic").put(True, wait=True)
 
-    PV("aao0").put(sine(0.3, 500, DAC_WF_MAX_LEN), wait=True)
+    PV("aao0").put(sine(mag, freq, DAC_WF_MAX_LEN), wait=True)
 
 
 if __name__ == "__main__":
